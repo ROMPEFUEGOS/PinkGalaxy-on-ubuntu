@@ -1,12 +1,12 @@
 #!/bin/bash
-# Instalador de PinkGalaxy para Linux (Wine)
-# Basado en la investigación de Kecojones
+# Instalador de PinkGalaxy para Linux (Wine) - Versión Definitiva
+# Solución por Kecojones & Rompefuegos
 
 APP_NAME="PinkGalaxy"
 INSTALL_DIR="$HOME/Games/PinkGalaxy"
 WINE_PREFIX="$HOME/.local/share/wineprefixes/pinkgalaxy"
 
-echo "=== Iniciando Instalación de $APP_NAME ==="
+echo "=== Iniciando Instalación de $APP_NAME (Edición Definitiva) ==="
 
 # 1. Comprobar dependencias
 echo "--> Comprobando herramientas necesarias..."
@@ -18,71 +18,79 @@ for tool in wine winetricks msiextract 7z; do
     fi
 done
 
-# 2. Pedir el instalador del juego
+# 2. Pedir el instalador
 if [ ! -f "game.msi" ]; then
-    echo "ERROR: Por favor, descarga el instalador 'game.msi' de la web oficial"
-    echo "y colócalo en esta misma carpeta junto a este script."
+    echo "ERROR: Por favor, coloca el archivo 'game.msi' en esta carpeta."
     exit 1
 fi
 
-# 3. Preparar entorno Wine (64 bits limpio)
-echo "--> Creando entorno Wine limpio en: $WINE_PREFIX"
+# 3. Crear entorno Wine (64 bits)
+echo "--> Creando entorno Wine en: $WINE_PREFIX"
 export WINEPREFIX="$WINE_PREFIX"
 export WINEARCH=win64
-# Inicializar Wine sin interfaz
 wineboot -u
 
-# 4. Instalar librerías (La parte lenta)
-echo "--> Instalando librerías de Windows (Esto tardará, ten paciencia)..."
-# Evitamos ventanas de error
-winetricks -q dotnet48 corefonts vcrun2022 d3dcompiler_47 gdiplus dxvk
+# 4. Instalar Librerías Esenciales
+echo "--> Instalando librerías (Visual C++ y Fuentes)..."
+# vcrun2022 es crítico para el navegador CefSharp
+winetricks -q corefonts vcrun2022
 
-# 5. Configuración del Registro (Parches críticos)
-echo "--> Aplicando parches del registro..."
-# Activar TLS 1.2 (Conexión a internet)
+# 5. CONFIGURACIÓN CRÍTICA (La magia que arregla el juego)
+echo "--> Aplicando parches de estabilidad..."
+
+# A) Forzar Windows 10 (Necesario para CefSharp/Chromium)
+winetricks -q win10
+
+# B) Desactivar wbemprox (Soluciona el crasheo de 'AccessViolation' al leer discos)
+echo "   -> Desactivando sensor de hardware (wbemprox)..."
+wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v "wbemprox" /t REG_SZ /d "" /f
+
+# C) Camuflar unidad Z: como 'Unidad de Red' (Evita conflictos de serial)
+echo "   -> Configurando unidad Z como red..."
+wine reg add "HKEY_LOCAL_MACHINE\Software\Wine\Drives\z:" /v "Type" /t REG_SZ /d "network" /f
+
+# D) Activar TLS 1.2 (Para que conecte al servidor)
 wine reg add "HKEY_LOCAL_MACHINE\Software\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f
 wine reg add "HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f
-# Forzar Windows 7
-winetricks -q win7
-# Ocultar unidad Z: (Evita crasheo de lectura de disco)
-wine reg delete "HKEY_LOCAL_MACHINE\Software\Wine\Drives" /v "z:" /f 2>/dev/null
-# Fake Serial para C: (Evita crasheo de DeviceId)
-# Nota: Esto requiere winecfg manual o un script avanzado de edición de drives, 
-# pero generalmente ocultar Z: es suficiente.
 
-# 6. Extraer el juego
+# 6. Instalar el juego
 echo "--> Extrayendo archivos del juego..."
 mkdir -p "$INSTALL_DIR"
 msiextract game.msi -C "$INSTALL_DIR"
-# Mover la carpeta interna al sitio correcto
-mv "$INSTALL_DIR/PFiles/PinkGalaxy" "$WINE_PREFIX/drive_c/"
-rm -rf "$INSTALL_DIR" # Limpieza temporal
+# Mover archivos a la unidad C: virtual
+mkdir -p "$WINE_PREFIX/drive_c/PinkGalaxy"
+cp -r "$INSTALL_DIR/PFiles/PinkGalaxy/"* "$WINE_PREFIX/drive_c/PinkGalaxy/"
+rm -rf "$INSTALL_DIR"
 
-# 7. Configuración de Red (Ping)
-echo "--> Configurando permisos de red (Requiere contraseña sudo)..."
-echo "net.ipv4.ping_group_range = 0 2147483647" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
+# 7. Configurar Ping (Para que no te eche el servidor)
+echo "--> Ajustando permisos de red (Ping)..."
+# Nota: Esto puede pedir contraseña sudo
+echo "net.ipv4.ping_group_range = 0 2147483647" | sudo tee -a /etc/sysctl.conf > /dev/null
+sudo sysctl -p > /dev/null
 
-# 8. Crear el Lanzador
-echo "--> Creando acceso directo..."
-LAUNCHER_SCRIPT="$HOME/Desktop/Jugar_PinkGalaxy.sh"
-cat <<EOF > "$LAUNCHER_SCRIPT"
+# 8. Crear Lanzador Inteligente
+echo "--> Generando lanzador en el escritorio..."
+LAUNCHER="$HOME/Desktop/Jugar_PinkGalaxy.sh"
+
+cat <<EOF > "$LAUNCHER"
 #!/bin/bash
 export WINEPREFIX="$WINE_PREFIX"
-# Lanzar juego
-wine start /Unix "C:\\PinkGalaxy\\PinkGalaxy Client.exe" --no-sandbox --disable-gpu > /dev/null 2>&1 &
-# Esperar arranque
+# WINEDEBUG=-all silencia los errores inofensivos de wbemprox
+# --no-sandbox y --disable-gpu estabilizan el navegador interno
+echo "Iniciando PinkGalaxy..."
+WINEDEBUG=-all wine "$WINE_PREFIX/drive_c/PinkGalaxy/PinkGalaxy Client.exe" --no-sandbox --disable-gpu > /dev/null 2>&1 &
+
+# Monitor de cierre limpio
 sleep 10
-# Bucle vigilante
 while pgrep -f "PinkGalaxy Client.exe" > /dev/null; do
     sleep 2
 done
-# Matar zombies al cerrar
+# Limpieza de procesos zombies al salir
 pkill -f "PinkGalaxy Client.exe"
 pkill -f "CefSharp.BrowserSubprocess.exe"
 EOF
 
-chmod +x "$LAUNCHER_SCRIPT"
+chmod +x "$LAUNCHER"
 
-echo "=== ¡INSTALACIÓN COMPLETADA! ==="
-echo "Tienes un icono 'Jugar_PinkGalaxy.sh' en tu escritorio."
+echo "=== ¡INSTALACIÓN COMPLETADA CON ÉXITO! ==="
+echo "Ejecuta el acceso directo 'Jugar_PinkGalaxy.sh' en tu escritorio."
